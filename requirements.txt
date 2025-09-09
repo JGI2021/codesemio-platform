@@ -1,0 +1,24 @@
+# Core dependencies
+dspy-ai>=3.0.0
+pymongo>=4.0.0
+python-dotenv>=1.0.0
+
+# Embeddings and ML
+numpy>=1.24.0
+scikit-learn>=1.3.0
+sentence-transformers>=2.2.0  # Para embeddings
+
+# LLM Providers
+openai>=1.0.0
+anthropic>=0.3.0  # Opcional
+litellm>=1.0.0  # Para multi-modelo
+
+# Utils
+pandas>=2.0.0
+tqdm>=4.65.0
+requests>=2.31.0
+
+# Development
+pytest>=7.4.0
+black>=23.0.0
+pylint>=2.17.0
