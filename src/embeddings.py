@@ -105,9 +105,15 @@ class EmbeddingManager:
         field = field_map.get(emb_type)
         if not field:
             return None
+        
+        # Para rosetta_etl_v4, buscar por source="rosetta_etl"
+        if app_id == "rosetta_etl_v4":
+            query = {"source": "rosetta_etl", field: {"$exists": True}}
+        else:
+            query = {"application_id": app_id, field: {"$exists": True}}
             
         docs = list(collection.find(
-            {"application_id": app_id, field: {"$exists": True}},
+            query,
             {"_id": 1, field: 1, "code": 1, "file_path": 1, "module": 1}
         ).limit(limit))
         
@@ -220,14 +226,18 @@ class EmbeddingManager:
                         all_results[key]['weighted_score'] += r['score'] * weight
                         all_results[key]['sources'].append(emb_type)
         
-        # Búsqueda por texto como fallback
-        if not all_results and query_text:
-            all_results = self._text_search_fallback(query_text, weights)
+        # Si no hay vector o no hay resultados, usar búsqueda por texto
+        if query_text and (query_vector is None or not all_results):
+            text_results = self._text_search_fallback(query_text, weights)
+            # Combinar con resultados existentes
+            for key, result in text_results.items():
+                if key not in all_results:
+                    all_results[key] = result
             
         # Ordenar por score ponderado
         sorted_results = sorted(
             all_results.values(),
-            key=lambda x: x['weighted_score'],
+            key=lambda x: x.get('weighted_score', x.get('score', 0)),
             reverse=True
         )
         
@@ -237,12 +247,25 @@ class EmbeddingManager:
         """Búsqueda por texto cuando no hay vectores"""
         results = {}
         
+        # Dividir query en palabras clave para búsqueda más flexible
+        query_words = query.lower().split()
+        
         for emb_type, cache in self.embedding_caches.items():
             if cache and cache.get('texts'):
                 weight = weights.get(emb_type, 0.25)
                 
                 for i, text in enumerate(cache['texts']):
-                    if query.lower() in text.lower():
+                    text_lower = text.lower()
+                    
+                    # Calcular score basado en coincidencias
+                    score = 0
+                    for word in query_words:
+                        if len(word) > 2:  # Ignorar palabras muy cortas
+                            if word in text_lower:
+                                score += 1
+                    
+                    # Si hay alguna coincidencia, añadir resultado
+                    if score > 0:
                         key = f"{emb_type}_{cache['ids'][i]}"
                         if key not in results:
                             results[key] = {
@@ -250,10 +273,12 @@ class EmbeddingManager:
                                 'text': text,
                                 'type': emb_type,
                                 'weighted_score': 0,
-                                'sources': []
+                                'sources': [],
+                                'score': score / len(query_words)  # Normalizar score
                             }
-                        results[key]['weighted_score'] += weight
-                        results[key]['sources'].append(emb_type)
+                        results[key]['weighted_score'] += (score / len(query_words)) * weight
+                        if emb_type not in results[key]['sources']:
+                            results[key]['sources'].append(emb_type)
                         
         return results
     

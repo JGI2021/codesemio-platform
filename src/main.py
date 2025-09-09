@@ -12,7 +12,7 @@ from typing import Optional
 # Añadir src al path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from platform import CodeSemioPlatform
+from codesemio_platform import CodeSemioPlatform
 from models import LLMModel, Application, MODEL_CONFIGS
 from dspy_modules import CodeSemioDSPyPipeline
 
@@ -95,40 +95,45 @@ class CodeSemioUI:
         """Selecciona aplicación"""
         print("\n📱 APLICACIONES DISPONIBLES:")
         
-        # Mostrar aplicaciones descubiertas
-        discovered = list(self.platform.app_embeddings.keys())[:10]
-        for i, app in enumerate(discovered, 1):
-            info = self.platform.app_embeddings[app]
-            print(f"{i}. {app}")
-            print(f"   Ontology: {info.get('ontology_count', 0)} docs")
-            print(f"   Code: {info.get('code_count', 0)} docs")
+        # Mostrar aplicaciones descubiertas (solo rosetta_etl_v4)
+        discovered = list(self.platform.app_embeddings.keys())
         
-        # Mostrar aplicaciones predefinidas
-        print("\nAPLICACIONES PREDEFINIDAS:")
-        for i, app in enumerate(Application, len(discovered) + 1):
-            print(f"{i}. {app.value} - {app.name}")
+        # Siempre mostrar rosetta_etl_v4 primero si existe
+        option_num = 1
+        app_map = {}
         
-        choice = input("\n📱 Selecciona aplicación (número o nombre): ").strip()
+        if 'rosetta_etl_v4' in discovered:
+            info = self.platform.app_embeddings['rosetta_etl_v4']
+            print(f"{option_num}. 🚀 Rosetta ETL v4")
+            print(f"   📚 Ontología: {info.get('ontology_count', 0)} documentos")
+            print(f"   💻 Código: {info.get('code_count', 0)} documentos")
+            app_map[str(option_num)] = 'rosetta_etl_v4'
+            app_map['rosetta'] = 'rosetta_etl_v4'
+            app_map['rosetta_etl'] = 'rosetta_etl_v4'
+            option_num += 1
+        
+        # Mostrar otras aplicaciones predefinidas
+        print("\n📦 OTRAS APLICACIONES:")
+        for app in Application:
+            if app.value != 'rosetta_etl':  # No duplicar rosetta
+                print(f"{option_num}. {app.name}")
+                app_map[str(option_num)] = app.value
+                option_num += 1
+        
+        choice = input("\n📱 Selecciona aplicación (1 para Rosetta, número o nombre): ").strip()
         
         # Procesar selección
-        try:
-            idx = int(choice) - 1
-            if idx < len(discovered):
-                app_id = discovered[idx]
-            else:
-                app_idx = idx - len(discovered)
-                apps = list(Application)
-                if app_idx < len(apps):
-                    app_id = apps[app_idx].value
-                else:
-                    app_id = choice
-        except:
+        if choice in app_map:
+            app_id = app_map[choice]
+        elif choice.lower() in ['rosetta', 'rosetta_etl', 'rosetta_etl_v4', '1']:
+            app_id = 'rosetta_etl_v4'
+        else:
             app_id = choice
         
         if self.platform.select_application(app_id):
-            print(f"✅ Aplicación '{app_id}' seleccionada")
+            print(f"✅ Aplicación seleccionada correctamente")
         else:
-            print(f"❌ No se pudo seleccionar '{app_id}'")
+            print(f"❌ No se pudo seleccionar la aplicación")
     
     def _select_model(self):
         """Selecciona modelo LLM"""
@@ -143,15 +148,11 @@ class CodeSemioUI:
         
         choice = input("\n🤖 Selecciona modelo (1-7): ").strip()
         
-        model_map = {
-            '1': LLMModel.GPT4,
-            '2': LLMModel.GPT4_TURBO,
-            '3': LLMModel.GPT4_MINI,
-            '4': LLMModel.GPT35_TURBO,
-            '5': LLMModel.CLAUDE_3_OPUS,
-            '6': LLMModel.MISTRAL_LARGE,
-            '7': LLMModel.LLAMA_70B
-        }
+        # Mapeo correcto basado en el orden de MODEL_CONFIGS
+        models_list = list(MODEL_CONFIGS.keys())
+        model_map = {}
+        for i, model in enumerate(models_list[:7], 1):  # Solo los primeros 7
+            model_map[str(i)] = model
         
         if choice in model_map:
             if self.platform.select_model(model_map[choice]):

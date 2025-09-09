@@ -1,4 +1,4 @@
-# BITÁCORA - CODESEMIO PLATFORM
+Tengo # BITÁCORA - CODESEMIO PLATFORM
 
 ## 📅 Sesión: 9 de Septiembre 2025, 02:30 AM
 
@@ -149,3 +149,134 @@ La plataforma CodeSemio v1.0.0 está completa con:
 ---
 *Última actualización: 9 Sep 2025, 02:35 AM*
 *Próxima sesión: Configurar API keys y probar el sistema completo*
+
+## 📅 Sesión: 9 de Septiembre 2025, 19:00 - 20:00 PM
+
+### 🎯 Objetivo de la Sesión
+Solucionar problemas de búsqueda y mejorar la integración del sistema.
+
+### 🔧 Problemas Identificados y Solucionados
+
+#### 1. ❌ **Problema: Búsquedas devolvían 0 resultados**
+**Causa**: 
+- La función `hybrid_search` pasaba `query_vector=None`
+- No había fallback para búsqueda por texto
+- Los embeddings no se cargaban correctamente
+
+**Solución**: ✅
+- Mejorado `_text_search_fallback` para búsqueda por palabras clave
+- Actualizado `hybrid_search` para funcionar sin vector
+- Ajustado límite de carga de embeddings a 500 docs
+
+#### 2. ❌ **Problema: Aplicaciones duplicadas (rosetta_etl vs rosetta_etl_v4)**
+**Causa**:
+- Datos en MongoDB con diferentes IDs
+- ObjectId `68bf6a08dac81fe6e6a0a9b2` para código
+- String `rosetta_etl_v4` para ontología
+
+**Solución**: ✅
+- Consolidado en una sola aplicación usando campo `source: "rosetta_etl"`
+- Actualizado `_discover_applications` para unificar conteos
+- Mapeado automático de `rosetta_etl` → `rosetta_etl_v4`
+
+**Estadísticas finales**:
+- 📚 Ontología: 2133 documentos
+- 💻 Código: 1714 documentos (identificados por `source: "rosetta_etl"`)
+
+#### 3. ❌ **Problema: Selección de modelo no funcionaba**
+**Causa**:
+- Mapeo incorrecto de opciones del menú
+- Orden hardcodeado no coincidía con `MODEL_CONFIGS`
+
+**Solución**: ✅
+- Mapeo dinámico basado en `MODEL_CONFIGS.keys()`
+- Soporte multi-provider (OpenAI, Anthropic)
+- Fallback inteligente a GPT-3.5 cuando falla otro modelo
+
+#### 4. ✅ **Integración con 1Password**
+**Estado**:
+- 1Password CLI v2.12.0 instalado ✅
+- Conectado con la app de 1Password ✅
+- SecretsManager integrado en la plataforma ✅
+
+**Credenciales recuperadas de 1Password**:
+- ✅ OpenAI API Key: Funcionando
+- ✅ MongoDB URI: Funcionando  
+- ⚠️ Anthropic API Key: Presente pero inválida/expirada
+
+### 📂 Archivos Modificados
+
+1. **src/codesemio_platform.py**
+   - Integrado `SecretsManager` para 1Password
+   - Mejorado `_discover_applications` para consolidar Rosetta
+   - Actualizado `_get_or_create_llm` con soporte multi-provider
+   - Ajustado límites de carga de embeddings
+
+2. **src/embeddings.py**
+   - Mejorado `hybrid_search` para funcionar sin vector
+   - Optimizado `_text_search_fallback` con búsqueda por palabras
+   - Actualizado `_load_code_vectors` para usar campo `source`
+
+3. **src/main.py**
+   - Simplificado menú de aplicaciones
+   - Corregido mapeo dinámico de modelos
+   - Mejorada presentación de estadísticas
+
+### 🧪 Scripts de Test Creados
+
+- `debug_search.py`: Verificación de datos en MongoDB
+- `test_search_fix.py`: Test de búsquedas corregidas
+- `test_rosetta_complete.py`: Test completo de Rosetta
+
+### 🚀 Estado Actual del Sistema
+
+**Funcionalidades operativas**:
+- ✅ Búsqueda funcionando (ontología y código)
+- ✅ Selección de modelos con fallback
+- ✅ 1Password integrado con fallback a .env
+- ✅ Consolidación de aplicaciones
+- ✅ 3847 documentos totales indexados
+
+**Para ejecutar**:
+```bash
+cd /Users/javiergimeno/entornos/DSPy/demo_dspy/CODESEMIO_PLATFORM
+source ../venv_dspy/bin/activate
+python src/main.py
+```
+
+### 💡 Próximos Pasos
+
+1. **Actualizar Anthropic API Key**
+   - Obtener key válida de Anthropic
+   - Actualizar en 1Password vault "CodeSemio"
+
+2. **Optimizar rendimiento**
+   - Implementar cache persistente de embeddings
+   - Reducir tiempo de carga inicial
+
+3. **Mejorar búsqueda**
+   - Implementar generación de embeddings para queries
+   - Añadir re-ranking con DSPy
+
+4. **Expandir funcionalidades**
+   - Completar Transfer Learning
+   - Implementar análisis con DSPy
+   - Demo Embat + Rosetta
+
+### 📝 Notas Técnicas
+
+- El sistema usa `source: "rosetta_etl"` para identificar documentos de código
+- 1Password funciona con el vault "CodeSemio"
+- Fallback automático: Claude → GPT-3.5, 1Password → .env
+- Límite de embeddings: 500 docs por tipo para balance velocidad/cobertura
+
+### ✅ Logros de la Sesión
+
+1. **Búsquedas funcionando** - Ya encuentra resultados relevantes
+2. **Aplicación unificada** - Solo una Rosetta con todos los datos
+3. **1Password operativo** - Gestión segura de credenciales
+4. **Sistema robusto** - Múltiples fallbacks para alta disponibilidad
+
+---
+*Última actualización: 9 Sep 2025, 20:00 PM*
+*Sesión completada: Sistema funcional con búsquedas operativas y 1Password integrado*

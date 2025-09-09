@@ -12,13 +12,14 @@ import json
 from datetime import datetime
 import hashlib
 
-from .models import (
+from models import (
     LLMModel, Application, EmbeddingType,
     MODEL_CONFIGS, APPLICATION_CONFIGS,
     ModelSelector
 )
-from .embeddings import EmbeddingManager, EmbeddingFusion
-from .dspy_modules import CodeSemioDSPyPipeline
+from embeddings import EmbeddingManager, EmbeddingFusion
+from dspy_modules import CodeSemioDSPyPipeline
+from secrets_manager import SecretsManager
 
 # Cargar configuración
 load_dotenv()
@@ -37,10 +38,15 @@ class CodeSemioPlatform:
         Args:
             mongodb_uri: URI de MongoDB Atlas
         """
-        # MongoDB
-        uri = mongodb_uri or os.getenv('MONGODB_URI', 
-            "mongodb+srv://JGimeno:BabTak2023@cluster1.p3da8rm.mongodb.net/")
-        self.mongo_client = MongoClient(uri)
+        # Inicializar SecretsManager para 1Password
+        self.secrets_manager = SecretsManager(vault_name="CodeSemio", environment="development")
+        
+        # MongoDB - intentar obtener de 1Password primero
+        if not mongodb_uri:
+            mongodb_uri = self.secrets_manager.get_secret('MONGODB_URI', 
+                default="mongodb+srv://JGimeno:BabTak2023@cluster1.p3da8rm.mongodb.net/")
+        
+        self.mongo_client = MongoClient(mongodb_uri)
         self.db = self.mongo_client['analisis_semantico']
         
         # Managers
@@ -60,6 +66,10 @@ class CodeSemioPlatform:
         
         print(f"🚀 CodeSemio Platform v1.0.0")
         print(f"📍 Session: {self.session_id}")
+        if self.secrets_manager.op_available:
+            print(f"🔐 1Password: ✅ Conectado")
+        else:
+            print(f"🔐 1Password: ❌ No disponible (usando .env)")
         
         self._initialize()
     
@@ -81,29 +91,26 @@ class CodeSemioPlatform:
     def _discover_applications(self):
         """Descubre aplicaciones disponibles en MongoDB"""
         try:
-            # Buscar en ontology_vectors
-            apps_ontology = self.db['ontology_vectors'].distinct("application_id")
+            # Contar documentos de ontología para rosetta_etl_v4
+            ontology_count = self.db['ontology_vectors'].count_documents(
+                {"application_id": "rosetta_etl_v4"}
+            )
             
-            # Buscar en code_vectors
-            apps_code = self.db['code_vectors'].distinct("application_id")
+            # Contar documentos de código usando el campo source
+            code_count = self.db['code_vectors'].count_documents(
+                {"source": "rosetta_etl"}
+            )
             
-            # Combinar
-            all_apps = set(apps_ontology + apps_code)
+            # Crear entrada consolidada para Rosetta ETL
+            self.app_embeddings['rosetta_etl_v4'] = {
+                'ontology_count': ontology_count,
+                'code_count': code_count,
+                'loaded': False,
+                'embeddings': {}
+            }
             
-            for app_id in all_apps:
-                if app_id:
-                    self.app_embeddings[app_id] = {
-                        'ontology_count': self.db['ontology_vectors'].count_documents(
-                            {"application_id": app_id}
-                        ),
-                        'code_count': self.db['code_vectors'].count_documents(
-                            {"application_id": app_id}
-                        ),
-                        'loaded': False,
-                        'embeddings': {}
-                    }
-            
-            print(f"📱 Aplicaciones encontradas: {list(self.app_embeddings.keys())[:5]}")
+            # Mostrar estadísticas
+            print(f"📱 Rosetta ETL v4: {ontology_count} docs ontología, {code_count} docs código")
             
         except Exception as e:
             print(f"⚠️ Error descubriendo aplicaciones: {e}")
@@ -125,6 +132,11 @@ class CodeSemioPlatform:
         Returns:
             True si se seleccionó correctamente
         """
+        # Mapear rosetta_etl a rosetta_etl_v4 para compatibilidad
+        if app_id == "rosetta_etl":
+            app_id = "rosetta_etl_v4"
+            print(f"📝 Mapeando rosetta_etl → rosetta_etl_v4")
+        
         # Verificar si existe
         if app_id not in self.app_embeddings and app_id not in [a.value for a in Application]:
             print(f"❌ Aplicación no encontrada: {app_id}")
@@ -143,8 +155,10 @@ class CodeSemioPlatform:
         """Carga embeddings de una aplicación"""
         print(f"⏳ Cargando embeddings para {app_id}...")
         
-        # Determinar tipos de embeddings a cargar
-        if app_id in [a.value for a in Application]:
+        # Para rosetta_etl_v4, cargar solo ontology por ahora (código es opcional)
+        if app_id == "rosetta_etl_v4":
+            embedding_types = ['ontology']  # Solo ontology por rendimiento
+        elif app_id in [a.value for a in Application]:
             # Aplicación conocida
             app_config = APPLICATION_CONFIGS.get(Application(app_id))
             if app_config:
@@ -155,11 +169,11 @@ class CodeSemioPlatform:
             # Aplicación genérica - cargar todos los disponibles
             embedding_types = ['ontology', 'codebert', 'graphcodebert', 'hybrid']
         
-        # Cargar con el manager
+        # Cargar con el manager - límite moderado para balance velocidad/cobertura
         loaded = self.embedding_manager.load_embeddings_for_app(
             app_id, 
             embedding_types,
-            limit=500
+            limit=500  # Límite balanceado
         )
         
         if app_id not in self.app_embeddings:
@@ -203,14 +217,48 @@ class CodeSemioPlatform:
             if not config:
                 return None
             
-            # Por ahora solo soportamos OpenAI
+            # Soporte para diferentes providers
             if config.provider == "openai":
-                api_key = os.getenv('OPENAI_API_KEY')
+                # Obtener API key de 1Password o .env
+                api_key = self.secrets_manager.get_secret('OPENAI_API_KEY')
                 if api_key:
                     lm = dspy.LM(f'openai/{model.value}', api_key=api_key)
                     self.llm_cache[model] = lm
+                else:
+                    print("⚠️ No se encontró OPENAI_API_KEY")
+                    return None
+            elif config.provider == "anthropic":
+                # Obtener API key de 1Password o .env
+                api_key = self.secrets_manager.get_secret('ANTHROPIC_API_KEY')
+                if api_key and not api_key.endswith('...'):
+                    try:
+                        # Intentar crear cliente Anthropic
+                        lm = dspy.LM(f'claude-3-opus-20240229', api_key=api_key)
+                        self.llm_cache[model] = lm
+                        print(f"✅ Claude configurado correctamente desde {'1Password' if self.secrets_manager.op_available else '.env'}")
+                    except Exception as e:
+                        print(f"⚠️ Error con Claude API: {str(e)[:50]}...")
+                        print("   Usando GPT-3.5 como fallback")
+                        # Fallback a GPT-3.5
+                        openai_key = self.secrets_manager.get_secret('OPENAI_API_KEY')
+                        if openai_key:
+                            lm = dspy.LM('openai/gpt-3.5-turbo', api_key=openai_key)
+                            self.llm_cache[model] = lm
+                else:
+                    print("⚠️ ANTHROPIC_API_KEY no disponible o incompleta")
+                    if self.secrets_manager.op_available:
+                        print("   💡 Configura 'Anthropic API' en 1Password vault 'CodeSemio'")
+                    else:
+                        print("   💡 Actualiza ANTHROPIC_API_KEY en .env o configura 1Password")
+                    print("   Usando GPT-3.5 como fallback")
+                    # Fallback a GPT-3.5
+                    openai_key = self.secrets_manager.get_secret('OPENAI_API_KEY')
+                    if openai_key:
+                        lm = dspy.LM('openai/gpt-3.5-turbo', api_key=openai_key)
+                        self.llm_cache[model] = lm
             else:
-                # Fallback a GPT para otros providers
+                # Para otros providers, usar GPT como fallback
+                print(f"⚠️ Provider {config.provider} no soportado, usando GPT-3.5")
                 api_key = os.getenv('OPENAI_API_KEY')
                 if api_key:
                     lm = dspy.LM('openai/gpt-3.5-turbo', api_key=api_key)
